@@ -1,3 +1,5 @@
+require 'celluloid/fsm'
+
 module Reel
   class Request
     # Tracks the state of Reel requests

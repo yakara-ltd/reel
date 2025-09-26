@@ -50,6 +50,7 @@ module Reel
       # HTTP::Parser callbacks
       #
       def on_headers_complete(headers)
+        validate_headers!(headers)
         info = Info.new(http_method, url, http_version, headers)
         req  = Request.new(info, connection)
 
@@ -88,6 +89,69 @@ module Reel
         end
 
         popped
+      end
+
+      private
+
+      def validate_headers!(headers)
+        # Prevent HTTP request smuggling via duplicate Content-Length headers
+        content_length_count = 0
+        transfer_encoding_value = nil
+
+        transfer_encoding_values = []
+
+        headers.each do |name, value|
+          case name.downcase
+          when 'content-length'
+            content_length_count += 1
+            if content_length_count > 1
+              raise Reel::RequestError, "Multiple Content-Length headers"
+            end
+            # Validate Content-Length value is a valid non-negative integer
+            unless value =~ /\A\d+\z/
+              raise Reel::RequestError, "Invalid Content-Length header value"
+            end
+          when 'transfer-encoding'
+            transfer_encoding_values << value
+          end
+        end
+
+        # Check for multiple Transfer-Encoding headers
+        if transfer_encoding_values.length > 1
+          # Multiple TE headers - chunked should be the last one
+          last_encoding = transfer_encoding_values.last.strip.downcase
+          unless last_encoding == 'chunked'
+            raise Reel::RequestError, "When multiple Transfer-Encoding headers present, chunked must be the final encoding"
+          end
+        end
+
+        # Process the combined transfer encoding value
+        transfer_encoding_value = transfer_encoding_values.first
+
+        # Validate Transfer-Encoding header values
+        if transfer_encoding_value
+          # Split by comma and validate each encoding
+          encodings = transfer_encoding_value.split(',').map(&:strip)
+          encodings.each do |encoding|
+            # Only allow standard HTTP/1.1 transfer encodings
+            unless encoding =~ /\A(chunked|compress|deflate|gzip|identity)\z/i
+              raise Reel::RequestError, "Invalid Transfer-Encoding: #{encoding}"
+            end
+          end
+
+          # Ensure chunked is the last encoding if present
+          if encodings.length > 1 && encodings.last.downcase != 'chunked'
+            raise Reel::RequestError, "Transfer-Encoding chunked must be the final encoding"
+          end
+        end
+
+        # Prevent conflicting Content-Length and Transfer-Encoding: chunked headers
+        if content_length_count > 0 && transfer_encoding_value
+          encodings = transfer_encoding_value.split(',').map(&:strip).map(&:downcase)
+          if encodings.include?('chunked')
+            raise Reel::RequestError, "Cannot have both Content-Length and Transfer-Encoding: chunked"
+          end
+        end
       end
     end
   end

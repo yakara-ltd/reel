@@ -1,8 +1,11 @@
 source 'https://rubygems.org'
 
-ruby RUBY_VERSION
+ruby '>= 3.3.0'
 
 gem 'jruby-openssl' if defined? JRUBY_VERSION
+
+# Use master branch of http_parser.rb for better Ruby 3.3+ compatibility
+gem 'http_parser.rb', git: 'https://github.com/tmm1/http_parser.rb.git', branch: 'master'
 
 # Specify your gem's dependencies in reel.gemspec
 gemspec
